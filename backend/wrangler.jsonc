@@ -4,9 +4,9 @@
  */
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"name": "durable-object-starter",
+	"name": "shipwrecked-multiplayer",
 	"main": "src/index.js",
-	"compatibility_date": "2025-08-09",
+	"compatibility_date": "2025-08-10",
 	"assets": {
 		// The path to the directory containing the `index.html` file to be served at `/`
 		"directory": "./public"
@@ -14,11 +14,17 @@
 	"durable_objects": {
 		"bindings": [
 			{
-				"class_name": "Server",
-				"name": "SERVER"
+				"class_name": "IPRouletteGame",
+				"name": "ROULETTE_GAME"
 			}
 		]
 	},
+	"migrations": [
+		{
+			"new_sqlite_classes": ["IPRouletteGame"],
+			"tag": "v1"
+		}
+	],
 	"observability": {
 		"enabled": true
 	}
