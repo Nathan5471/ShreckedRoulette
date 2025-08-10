@@ -189,6 +189,56 @@ export class IPRouletteGame extends DurableObject {
 					break;
 				}
 
+				case 'spinWheel': {
+					// Check if we have enough users
+					if (this.users.length < 4) {
+						return;
+					}
+
+					// Randomly select a user on the server side
+					const selectedIndex = Math.floor(Math.random() * this.users.length);
+					const selectedUser = this.users[selectedIndex];
+
+					if (selectedUser) {
+						// Calculate rotation values on the server to ensure all clients see the same animation
+						const rotations = 10 + Math.floor(Math.random() * 5); // Between 10-14 full rotations for more suspense
+						const segmentAngle = 360 / this.users.length;
+						const segmentCenter = selectedIndex * segmentAngle + segmentAngle / 2;
+
+						// For clockwise rotation:
+						// To make the selected user land directly under the pointer (at top/0 degrees),
+						// we need to rotate the wheel so that the segment center aligns with 0 degrees (top)
+						// This means we need to rotate by 360 - segmentCenter degrees
+						const targetAngle = 360 - segmentCenter;
+
+						// Total rotation - always clockwise (positive numbers)
+						// The wheel will always spin in a clockwise direction with many rotations
+						const totalRotation = rotations * 360 + targetAngle;
+
+						// Broadcast the wheel spin to all clients, including rotation details
+						this.broadcastMessage('wheelSpin', {
+							selectedUserId: selectedUser.id,
+							selectedUsername: selectedUser.username,
+							totalRotation: totalRotation,
+						});
+
+						// Add this user to revealed users list
+						this.revealedUsers.push(selectedUser.id);
+						await this.saveState();
+
+						// Give time for the animation to complete before revealing the IP
+						setTimeout(() => {
+							this.broadcastMessage('ipRevealed', {
+								playerId: selectedUser.id,
+								playerUsername: selectedUser.username,
+								playerIP: selectedUser.ip,
+							});
+						}, 9000); // Wait for wheel animation plus a small buffer (matching the 8s animation + buffer)
+					}
+
+					break;
+				}
+
 				// Add more event handlers here as needed
 
 				default:
@@ -201,72 +251,24 @@ export class IPRouletteGame extends DurableObject {
 
 	async startGame() {
 		this.gameInProgress = true;
-		this.currentPlayerIndex = 0;
+		this.currentPlayerIndex = null; // We don't need this for the new approach
 		this.revealedUsers = [];
 		await this.saveState();
 
 		// Broadcast game start
 		this.broadcastMessage('gameStarted', {
-			currentPlayer: this.users[this.currentPlayerIndex].username,
+			gameInProgress: true,
 		});
-
-		// Start the first round
-		this.processCurrentPlayer();
 	}
 
+	// These functions are no longer needed with the new approach
+	// since we're now selecting a random user directly when spinning the wheel
 	async processCurrentPlayer() {
-		if (!this.gameInProgress || this.currentPlayerIndex === null || this.users.length === 0) return;
-
-		const currentUser = this.users[this.currentPlayerIndex];
-		if (!currentUser) return;
-
-		// Broadcast whose turn it is
-		this.broadcastMessage('playerTurn', {
-			playerId: currentUser.id,
-			playerUsername: currentUser.username,
-		});
-
-		// Wait a few seconds before the "roulette" happens
-		await new Promise((resolve) => setTimeout(resolve, 3000));
-
-		// Check if the game is still in progress (users might have left)
-		if (!this.gameInProgress) return;
-
-		// Determine if IP gets revealed (1 in X chance, where X is number of players)
-		const revealIP = Math.floor(Math.random() * this.users.length) === 0;
-
-		if (revealIP) {
-			// Reveal the IP address
-			this.revealedUsers.push(currentUser.id);
-
-			this.broadcastMessage('ipRevealed', {
-				playerId: currentUser.id,
-				playerUsername: currentUser.username,
-				playerIP: currentUser.ip,
-			});
-		} else {
-			// IP not revealed this time
-			this.broadcastMessage('ipSafe', {
-				playerId: currentUser.id,
-				playerUsername: currentUser.username,
-			});
-		}
-
-		await this.saveState();
-
-		// Move to next player after a short delay
-		setTimeout(() => this.moveToNextPlayer(), 2000);
+		// Kept for backwards compatibility but not used
 	}
 
 	async moveToNextPlayer() {
-		if (!this.gameInProgress || this.users.length === 0) return;
-
-		// Move to next player
-		this.currentPlayerIndex = (this.currentPlayerIndex + 1) % this.users.length;
-		await this.saveState();
-
-		// Process the next player
-		this.processCurrentPlayer();
+		// Kept for backwards compatibility but not used
 	}
 
 	async broadcastMessage(event, data, excludeWs = null) {

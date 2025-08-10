@@ -26,6 +26,9 @@ interface WebSocketMessage {
     playerIP?: string;
     reason?: string;
     message?: string;
+    selectedUserId?: string;
+    selectedUsername?: string;
+    totalRotation?: number;
   };
 }
 
@@ -140,6 +143,45 @@ export default function Game() {
         updateGameStatus({ currentPlayer: data.playerUsername });
         break;
 
+      case "wheelSpin": {
+        // Handle wheel spinning received from server
+        setIsSpinning(true);
+        setRevealedIP(null);
+        setSelectedUsername(null);
+
+        // Use the rotation provided by the server
+        const animateSpin = () => {
+          // Reset wheel position first to allow for continuous spinning in the same direction
+          setWheelRotation(0);
+
+          // Delay slightly to ensure the reset is processed
+          setTimeout(() => {
+            // Only set the rotation if we received a valid number
+            if (typeof data.totalRotation === "number") {
+              setWheelRotation(data.totalRotation);
+            }
+
+            // Pre-set the selected username for immediate feedback after animation completes
+            if (data.selectedUsername) {
+              setTimeout(() => {
+                setIsSpinning(false);
+                setSelectedUsername(data.selectedUsername || null);
+              }, 8000); // Match this with the CSS transition duration (8s)
+            }
+          }, 50);
+        };
+
+        // Small delay before spinning for dramatic effect
+        setTimeout(animateSpin, 500);
+
+        logEvent(
+          `The wheel is spinning... who will be the unlucky one?`,
+          false,
+          "spinning"
+        );
+        break;
+      }
+
       case "ipRevealed":
         logEvent(
           `${data.playerUsername}'s IP address was revealed: ${data.playerIP}`,
@@ -214,75 +256,25 @@ export default function Game() {
 
     if (isSpinning) return;
 
-    setIsSpinning(true);
-    setRevealedIP(null);
-    setSelectedUsername(null);
+    // Reset wheel position first to ensure a fresh start
+    setWheelRotation(0);
 
-    // Generate random number of full rotations (between 5 and 8) plus a random angle
-    // More rotations for a more dramatic effect
-    const rotations = 5 + Math.floor(Math.random() * 3);
+    // Instead of selecting a user and calculating the rotation locally,
+    // just send a request to the server to spin the wheel.
+    // The server will randomly select a user and calculate the appropriate rotation
+    if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
+      socketRef.current.send(
+        JSON.stringify({
+          event: "spinWheel",
+          data: {},
+        })
+      );
 
-    // Select a random user
-    const selectedIndex = Math.floor(Math.random() * users.length);
-    const selected = users[selectedIndex];
+      logEvent("Spinning the wheel of misfortune...", false, "spinning");
+    }
 
-    console.log("Selected user for IP reveal:", selected); // Debug log
-
-    // Calculate the exact angle needed to land on the selected user's segment
-    const segmentAngle = 360 / users.length;
-    const segmentCenter = selectedIndex * segmentAngle + segmentAngle / 2;
-
-    // We want the wheel to stop with the pointer at the center of the selected segment
-    // The pointer is at 0 degrees (top), so we need to rotate to 360 - segmentCenter
-    const targetAngle = 360 - segmentCenter;
-
-    // Total rotation includes full rotations plus the precise angle to land on target
-    const totalRotation = rotations * 360 + targetAngle;
-
-    // Animation for spinning the wheel - initially fast, then slowing down
-    const animateSpin = () => {
-      // Set the target rotation directly - CSS transition will animate it
-      setWheelRotation(totalRotation);
-
-      // After the animation completes
-      setTimeout(() => {
-        setIsSpinning(false);
-
-        // Debug info
-        console.log("Sending ipReveal event for user:", selected.id);
-
-        // Send a message to the server to reveal the IP of the selected user
-        socketRef.current?.send(
-          JSON.stringify({
-            event: "ipReveal",
-            data: { userId: selected.id },
-          })
-        );
-
-        // Pre-set the selected username for immediate feedback
-        setSelectedUsername(selected.username);
-
-        // If we don't receive server response within 2 seconds, simulate it for testing
-        // This is just for demo/debugging purposes
-        setTimeout(() => {
-          if (!revealedIP) {
-            console.log("Server didn't respond with IP, generating mock IP");
-            // Generate a mock IP address for testing purposes
-            const mockIP = `${Math.floor(Math.random() * 256)}.${Math.floor(
-              Math.random() * 256
-            )}.${Math.floor(Math.random() * 256)}.${Math.floor(
-              Math.random() * 256
-            )}`;
-            setRevealedIP(mockIP);
-          }
-        }, 2000);
-      }, 5000); // Match this with the CSS transition duration (5s)
-    };
-
-    // Small delay before spinning for dramatic effect
-    setTimeout(animateSpin, 500);
+    // No need for local animation handling as it will be triggered by the server message
   };
-
   return (
     <div className="min-h-screen bg-gradient-to-b from-green-900 to-green-700 py-8 px-4">
       <div className="max-w-3xl mx-auto bg-white rounded-lg shadow-xl overflow-hidden">
@@ -439,7 +431,7 @@ export default function Game() {
                       style={{
                         transform: `rotate(${wheelRotation}deg)`,
                         transition: isSpinning
-                          ? "transform 5s cubic-bezier(0.3, 0.1, 0.3, 1.0)"
+                          ? "transform 8s cubic-bezier(0.2, 0.1, 0.1, 1.0)"
                           : "transform 0.5s ease-out",
                       }}
                     >
