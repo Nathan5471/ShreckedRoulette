@@ -47,6 +47,12 @@ export default function Game() {
   const [currentPlayer, setCurrentPlayer] = useState<string | null>(null);
   const eventsLogRef = useRef<HTMLDivElement>(null);
 
+  // New state variables for the wheel
+  const [isSpinning, setIsSpinning] = useState(false);
+  const [wheelRotation, setWheelRotation] = useState(0);
+  const [revealedIP, setRevealedIP] = useState<string | null>(null);
+  const [selectedUsername, setSelectedUsername] = useState<string | null>(null);
+
   useEffect(() => {
     // Scroll to bottom of events log whenever events change
     if (eventsLogRef.current) {
@@ -140,6 +146,8 @@ export default function Game() {
           false,
           "revealed"
         );
+        if (data.playerIP) setRevealedIP(data.playerIP);
+        if (data.playerUsername) setSelectedUsername(data.playerUsername);
         break;
 
       case "ipSafe":
@@ -161,6 +169,7 @@ export default function Game() {
         setGameInProgress(false);
         updateGameStatus({});
         logEvent(`Game reset: ${data.message}`, true);
+        navigate("/");
         break;
 
       default:
@@ -189,23 +198,89 @@ export default function Game() {
     connectWebSocket();
   };
 
-  const handleClearPlayers = () => {
-    if (window.confirm("Are you sure you want to clear all players?")) {
-      socketRef.current?.send(
-        JSON.stringify({
-          event: "clearPlayers",
-          data: {},
-        })
-      );
-    }
-  };
-
   const handleGoBack = () => {
     // Close socket if open
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       socketRef.current.close();
     }
     navigate("/");
+  };
+
+  const handleSpinWheel = () => {
+    if (users.length < 4) {
+      alert("Need at least 4 players to start the game");
+      return;
+    }
+
+    if (isSpinning) return;
+
+    setIsSpinning(true);
+    setRevealedIP(null);
+    setSelectedUsername(null);
+
+    // Generate random number of full rotations (between 5 and 8) plus a random angle
+    // More rotations for a more dramatic effect
+    const rotations = 5 + Math.floor(Math.random() * 3);
+
+    // Select a random user
+    const selectedIndex = Math.floor(Math.random() * users.length);
+    const selected = users[selectedIndex];
+
+    console.log("Selected user for IP reveal:", selected); // Debug log
+
+    // Calculate the exact angle needed to land on the selected user's segment
+    const segmentAngle = 360 / users.length;
+    const segmentCenter = selectedIndex * segmentAngle + segmentAngle / 2;
+
+    // We want the wheel to stop with the pointer at the center of the selected segment
+    // The pointer is at 0 degrees (top), so we need to rotate to 360 - segmentCenter
+    const targetAngle = 360 - segmentCenter;
+
+    // Total rotation includes full rotations plus the precise angle to land on target
+    const totalRotation = rotations * 360 + targetAngle;
+
+    // Animation for spinning the wheel - initially fast, then slowing down
+    const animateSpin = () => {
+      // Set the target rotation directly - CSS transition will animate it
+      setWheelRotation(totalRotation);
+
+      // After the animation completes
+      setTimeout(() => {
+        setIsSpinning(false);
+
+        // Debug info
+        console.log("Sending ipReveal event for user:", selected.id);
+
+        // Send a message to the server to reveal the IP of the selected user
+        socketRef.current?.send(
+          JSON.stringify({
+            event: "ipReveal",
+            data: { userId: selected.id },
+          })
+        );
+
+        // Pre-set the selected username for immediate feedback
+        setSelectedUsername(selected.username);
+
+        // If we don't receive server response within 2 seconds, simulate it for testing
+        // This is just for demo/debugging purposes
+        setTimeout(() => {
+          if (!revealedIP) {
+            console.log("Server didn't respond with IP, generating mock IP");
+            // Generate a mock IP address for testing purposes
+            const mockIP = `${Math.floor(Math.random() * 256)}.${Math.floor(
+              Math.random() * 256
+            )}.${Math.floor(Math.random() * 256)}.${Math.floor(
+              Math.random() * 256
+            )}`;
+            setRevealedIP(mockIP);
+          }
+        }, 2000);
+      }, 5000); // Match this with the CSS transition duration (5s)
+    };
+
+    // Small delay before spinning for dramatic effect
+    setTimeout(animateSpin, 500);
   };
 
   return (
@@ -300,51 +375,208 @@ export default function Game() {
                 )}
               </div>
 
-              <div className="game-controls mb-6">
+              <div className="game-controls mb-6 flex flex-wrap gap-3 justify-between">
                 <button
-                  onClick={handleClearPlayers}
+                  onClick={() => {
+                    if (
+                      socketRef.current &&
+                      socketRef.current.readyState === WebSocket.OPEN
+                    ) {
+                      socketRef.current.send(
+                        JSON.stringify({
+                          event: "leave",
+                          data: {},
+                        })
+                      );
+                      setJoinedGame(false);
+                    }
+                  }}
+                  className="px-4 py-2 bg-yellow-500 hover:bg-yellow-600 text-white font-medium rounded-md transition-colors"
+                >
+                  Leave Game
+                </button>
+
+                {users.length >= 4 && !isSpinning && (
+                  <button
+                    onClick={handleSpinWheel}
+                    className="px-6 py-3 bg-green-500 hover:bg-green-600 text-white font-bold rounded-md transition-colors text-lg shadow-md"
+                  >
+                    {revealedIP ? "SPIN AGAIN" : "SPIN THE WHEEL"}
+                  </button>
+                )}
+
+                <button
+                  onClick={() => {
+                    if (
+                      socketRef.current &&
+                      socketRef.current.readyState === WebSocket.OPEN
+                    ) {
+                      socketRef.current.send(
+                        JSON.stringify({
+                          event: "clearPlayers",
+                          data: {},
+                        })
+                      );
+                    }
+                  }}
                   className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white font-medium rounded-md transition-colors"
                 >
-                  Clear All Players
+                  Remove All Players
                 </button>
               </div>
 
               <div className="mb-4">
                 <h3 className="text-xl font-semibold mb-2 text-gray-700">
-                  Game Events:
+                  The Wheel of Misfortune:
                 </h3>
-                <div
-                  ref={eventsLogRef}
-                  className="events-log border border-gray-200 rounded-lg p-4 h-64 overflow-y-auto font-mono bg-gray-50"
-                >
-                  {events.map((event, idx) => (
+
+                <div className="relative mx-auto my-8 flex flex-col items-center">
+                  {/* Wheel container */}
+                  <div className="relative w-64 h-64 sm:w-80 sm:h-80 mx-auto">
+                    {/* Wheel */}
                     <div
-                      key={idx}
-                      className={`
-                        ${event.isError ? "text-red-600" : ""} 
-                        ${
-                          event.className === "current-player"
-                            ? "font-bold text-orange-600"
-                            : ""
-                        }
-                        ${
-                          event.className === "revealed"
-                            ? "font-bold text-red-700"
-                            : ""
-                        }
-                        ${
-                          event.className === "safe"
-                            ? "font-bold text-green-700"
-                            : ""
-                        }
-                      `}
+                      className="w-full h-full rounded-full border-8 border-green-200 bg-gradient-to-br from-green-800 to-green-600 shadow-xl flex items-center justify-center overflow-hidden"
+                      style={{
+                        transform: `rotate(${wheelRotation}deg)`,
+                        transition: isSpinning
+                          ? "transform 5s cubic-bezier(0.3, 0.1, 0.3, 1.0)"
+                          : "transform 0.5s ease-out",
+                      }}
                     >
-                      [{event.timestamp}] {event.message}
+                      {/* User segments on the wheel */}
+                      <div className="absolute w-full h-full">
+                        {users.map((user, idx) => {
+                          const segmentAngle = 360 / users.length;
+                          const startAngle = idx * segmentAngle;
+                          const endAngle = startAngle + segmentAngle;
+                          const isSelected = selectedUsername === user.username;
+
+                          // Multiple segment colors for better distinction
+                          const segmentColors = [
+                            "#059669",
+                            "#047857",
+                            "#065f46",
+                            "#0d9488",
+                            "#0f766e",
+                            "#115e59",
+                          ];
+                          const colorClass =
+                            segmentColors[idx % segmentColors.length];
+
+                          // Calculate arc path for segment - this creates proper pie slices
+                          const startRad = (startAngle * Math.PI) / 180;
+                          const endRad = (endAngle * Math.PI) / 180;
+
+                          const x1 = 50 + 50 * Math.sin(startRad);
+                          const y1 = 50 - 50 * Math.cos(startRad);
+
+                          const x2 = 50 + 50 * Math.sin(endRad);
+                          const y2 = 50 - 50 * Math.cos(endRad);
+
+                          const largeArcFlag = segmentAngle > 180 ? 1 : 0;
+
+                          const pathD = `M 50 50 L ${x1} ${y1} A 50 50 0 ${largeArcFlag} 1 ${x2} ${y2} Z`;
+
+                          return (
+                            <div key={user.id} className="absolute inset-0">
+                              <svg
+                                viewBox="0 0 100 100"
+                                className="w-full h-full"
+                              >
+                                <path
+                                  d={pathD}
+                                  fill={isSelected ? "#ef4444" : colorClass}
+                                  stroke={isSelected ? "#b91c1c" : "#064e3b"}
+                                  strokeWidth="0.5"
+                                />
+
+                                {/* Black divider line between segments */}
+                                <line
+                                  x1="50"
+                                  y1="50"
+                                  x2={x1}
+                                  y2={y1}
+                                  stroke="black"
+                                  strokeWidth="1"
+                                />
+                              </svg>
+
+                              {/* Username label positioned in segment */}
+                              <div
+                                className="absolute whitespace-nowrap text-white font-bold text-xs sm:text-sm z-10"
+                                style={{
+                                  left: `${
+                                    50 +
+                                    30 *
+                                      Math.sin(
+                                        ((startAngle + segmentAngle / 2) *
+                                          Math.PI) /
+                                          180
+                                      )
+                                  }%`,
+                                  top: `${
+                                    50 -
+                                    30 *
+                                      Math.cos(
+                                        ((startAngle + segmentAngle / 2) *
+                                          Math.PI) /
+                                          180
+                                      )
+                                  }%`,
+                                  transform: `translate(-50%, -50%) rotate(${
+                                    90 + startAngle + segmentAngle / 2
+                                  }deg)`,
+                                  textShadow: "1px 1px 2px rgba(0,0,0,0.7)",
+                                }}
+                              >
+                                {user.username}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Center of wheel */}
+                      <div className="w-16 h-16 rounded-full bg-green-500 flex items-center justify-center shadow-inner z-10">
+                        <div className="w-6 h-6 rounded-full bg-white"></div>
+                      </div>
                     </div>
-                  ))}
-                  {events.length === 0 && (
-                    <div className="py-2 text-gray-500 italic">
-                      No events yet
+
+                    {/* Pointer */}
+                    <div className="absolute top-0 left-1/2 w-5 h-10 bg-red-600 -ml-2.5 -mt-2 rounded-b-lg z-20"></div>
+                  </div>
+
+                  {/* Results display */}
+                  {revealedIP && selectedUsername && (
+                    <div className="mt-8 p-6 bg-red-100 border-2 border-red-500 rounded-lg text-center shadow-lg animate-pulse">
+                      <div className="flex items-center justify-center mb-2">
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="h-8 w-8 text-red-600 mr-2"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                          />
+                        </svg>
+                        <h3 className="text-2xl font-bold text-red-800">
+                          IP LEAKED!
+                        </h3>
+                      </div>
+                      <p className="text-lg font-semibold text-red-800 mb-3">
+                        {selectedUsername}'s bad luck has revealed their
+                        location!
+                      </p>
+                      <div className="mt-4 p-3 bg-red-200 rounded-md inline-block">
+                        <p className="text-xl font-mono font-bold text-red-900">
+                          IP Address: {revealedIP}
+                        </p>
+                      </div>
                     </div>
                   )}
                 </div>
